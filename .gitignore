@@ -1,0 +1,4 @@
+build/sdk/
+build/openwrt-sdk-*.tar.zst
+*.swp
+.DS_Store

@@ -1,0 +1,29 @@
+#!/bin/sh /etc/rc.common
+
+# procd oneshot wrapping the generator. Triggered on changes to
+# /etc/config/unbound_ext via procd_add_reload_trigger.
+#
+# START=92 keeps us after unbound (which starts in the 60s) so the
+# generator runs against an unbound that's been able to lay down its
+# own config at least once.
+
+USE_PROCD=1
+START=92
+
+GENERATOR=/usr/lib/unbound-uci-ext/generator.sh
+
+start_service() {
+	"$GENERATOR" apply
+}
+
+stop_service() {
+	"$GENERATOR" clear
+}
+
+reload_service() {
+	"$GENERATOR" apply
+}
+
+service_triggers() {
+	procd_add_reload_trigger "unbound_ext"
+}
