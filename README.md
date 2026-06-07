@@ -29,7 +29,7 @@ apk add unbound-uci-ext
 
 ## Configure: server-clause directives (`unbound_srv`)
 
-For directives that belong inside `server:` (interface binding, recursion source, harden flags, etc.). Example — loopback-only recursive resolver behind dnsmasq:
+For directives that belong inside `server:` (interface binding, recursion source, harden flags, etc.). Example: a loopback-only recursive resolver behind dnsmasq.
 
 ```sh
 uci set unbound_srv.main.enabled='1'
@@ -50,7 +50,7 @@ uci commit
 
 ## Configure: outside-server clauses (`unbound_ext`)
 
-For directives that start NEW clauses (`forward-zone:`, `view:`, `stub:`, `remote-control:`). Example — a forward-zone for one domain:
+For directives that start NEW clauses (`forward-zone:`, `view:`, `stub:`, `remote-control:`). Example: a forward-zone for one domain.
 
 ```sh
 uci set unbound_ext.main.enabled='1'

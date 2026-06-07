@@ -18,23 +18,51 @@
 #   apply   read both UCIs, rewrite both managed regions, restart if needed.
 #   clear   force both managed regions empty, restart if anything changed.
 
-set -eu
+set -e
+# Not `set -u`: /lib/functions.sh references several variables (IPKG_INSTROOT,
+# CONFIG_LIST_STATE, ...) without first defaulting them, which trips strict
+# unset-checking on every config_load. The trade is real but small - OpenWrt's
+# shell library is not -u-clean by convention.
 
-SRV_CONF=/etc/unbound/unbound_srv.conf
-EXT_CONF=/etc/unbound/unbound_ext.conf
+# Target paths are env-overridable so the unit-test harness can redirect
+# write_managed at a tempdir without forking a chroot.
+SRV_CONF=${SRV_CONF:-/etc/unbound/unbound_srv.conf}
+EXT_CONF=${EXT_CONF:-/etc/unbound/unbound_ext.conf}
 MARK_OPEN='# >>> unbound-uci-ext managed (do not edit) <<<'
 MARK_CLOSE='# <<< unbound-uci-ext managed <<<'
 MAX_LINE_LEN=256
 
 log() { logger -t unbound-uci-ext -- "$@"; }
 
-# ---------------------------------------------------------------------------
-# UCI loading
-# ---------------------------------------------------------------------------
+# /lib/functions.sh is sourced inside load_srv / load_ext rather than at
+# top-level so the script can be sourced by the unit-test harness on a
+# plain Linux box (no OpenWrt lib present) to exercise the pure-logic
+# functions. Sourcing functions.sh is idempotent; the dual-call cost is
+# a single fs read.
+
+# Returns 0 if the value passes the structural rules (non-empty, no embedded
+# newline, length cap), 1 otherwise. Logs a warning on rejection. Applied
+# uniformly to every passthrough field so a malformed entry can't escape the
+# managed region or break unbound's parser.
+is_valid_line() {
+	local v=$1 source=$2
+	# Command substitution strips trailing newlines, so `*$(printf '\n')*`
+	# collapses to `**` and matches everything. Embed a literal LF in the
+	# glob via a continued line instead.
+	case "$v" in
+		'') log "warn: ignoring empty $source"; return 1 ;;
+		*"
+"*) log "warn: ignoring $source with embedded newline"; return 1 ;;
+	esac
+	if [ "${#v}" -gt "$MAX_LINE_LEN" ]; then
+		log "warn: ignoring $source longer than $MAX_LINE_LEN chars"
+		return 1
+	fi
+	return 0
+}
 
 load_srv() {
 	. /lib/functions.sh
-
 	SRV_ENABLED=
 	SRV_IP_TRANSPARENT=
 	SRV_BIND_LINES=
@@ -49,11 +77,21 @@ load_srv() {
 		config_list_foreach "$cfg" interface_outgoing bundle_srv_outgoing
 		config_list_foreach "$cfg" srv_line           bundle_srv_line
 	}
-	bundle_srv_bind()     { SRV_BIND_LINES="${SRV_BIND_LINES}interface: $1
-"; }
-	bundle_srv_outgoing() { SRV_OUTGOING_LINES="${SRV_OUTGOING_LINES}outgoing-interface: $1
-"; }
-	bundle_srv_line()     { append_line SRV_LINES "$1" "srv_line"; }
+	bundle_srv_bind() {
+		is_valid_line "$1" "interface_bind" || return 0
+		SRV_BIND_LINES="${SRV_BIND_LINES}interface: $1
+"
+	}
+	bundle_srv_outgoing() {
+		is_valid_line "$1" "interface_outgoing" || return 0
+		SRV_OUTGOING_LINES="${SRV_OUTGOING_LINES}outgoing-interface: $1
+"
+	}
+	bundle_srv_line() {
+		is_valid_line "$1" "srv_line" || return 0
+		SRV_LINES="${SRV_LINES}$1
+"
+	}
 
 	config_load unbound_srv
 	config_foreach parse_srv unbound_srv
@@ -61,7 +99,6 @@ load_srv() {
 
 load_ext() {
 	. /lib/functions.sh
-
 	EXT_ENABLED=
 	EXT_LINES=
 
@@ -70,37 +107,22 @@ load_ext() {
 		config_get_bool EXT_ENABLED "$cfg" enabled 0
 		config_list_foreach "$cfg" ext_line bundle_ext_line
 	}
-	bundle_ext_line() { append_line EXT_LINES "$1" "ext_line"; }
+	bundle_ext_line() {
+		is_valid_line "$1" "ext_line" || return 0
+		EXT_LINES="${EXT_LINES}$1
+"
+	}
 
 	config_load unbound_ext
 	config_foreach parse_ext unbound_ext
 }
 
-# Shared safety check for raw passthrough entries: no embedded newlines,
-# length cap. Doesn't validate against unbound's grammar; let
-# unbound-checkconf flag malformed lines after restart.
-append_line() {
-	local var=$1 v=$2 source=$3
-	case "$v" in
-		'') log "warn: ignoring empty $source"; return ;;
-		*$(printf '\n')*) log "warn: ignoring $source with embedded newline"; return ;;
-	esac
-	if [ "${#v}" -gt "$MAX_LINE_LEN" ]; then
-		log "warn: ignoring $source longer than $MAX_LINE_LEN chars"
-		return
-	fi
-	eval "$var=\"\${$var}\$v
-\""
-}
-
-# ---------------------------------------------------------------------------
-# Rendering
-# ---------------------------------------------------------------------------
-
 render_srv_body() {
 	[ "$SRV_ENABLED" = "1" ] || return 0
 	printf '%s' "$SRV_BIND_LINES"
 	printf '%s' "$SRV_OUTGOING_LINES"
+	# Accept the same boolean forms uapi's normalize_bool does, so hand-edits
+	# to /etc/config/unbound_srv with `'yes'` / `'true'` work the same as `'1'`.
 	case "$SRV_IP_TRANSPARENT" in
 		1|yes|on|true)  echo "ip-transparent: yes" ;;
 		0|no|off|false) echo "ip-transparent: no" ;;
@@ -115,28 +137,32 @@ render_ext_body() {
 	printf '%s' "$EXT_LINES"
 }
 
-# ---------------------------------------------------------------------------
-# Managed-region write
-# ---------------------------------------------------------------------------
-
 strip_managed() {
 	local file=$1
 	[ -f "$file" ] || return 0
-	awk -v open="$MARK_OPEN" -v close="$MARK_CLOSE" '
-		$0 == open { in_managed = 1; next }
-		$0 == close { in_managed = 0; next }
+	# `close` clashes with awk's built-in close() function on busybox awk's
+	# parser - it errors out with "Unexpected token". Use unreserved names
+	# for the -v bindings.
+	awk -v omark="$MARK_OPEN" -v cmark="$MARK_CLOSE" '
+		$0 == omark { in_managed = 1; next }
+		$0 == cmark { in_managed = 0; next }
 		!in_managed { print }
 	' "$file"
 }
 
-# Returns 0 if the file changed, 1 if it's identical to what was there.
-# Used by the caller to decide whether unbound needs a restart.
+# Exit code IS the "changed" flag, not POSIX-standard success/failure:
+#   0 = wrote a new file (caller should restart unbound)
+#   1 = on-disk content is already correct (caller skips restart)
+# Lets the caller chain `write_managed ... && changed=1` cleanly.
 write_managed() {
 	local file=$1 body=$2 outer new
 	outer=$(strip_managed "$file")
 
 	if [ -n "$body" ]; then
-		new=$(printf '%s%s\n%s%s\n' \
+		# The %s for $body must be followed by \n: command substitution on
+		# render_*_body strips the trailing newline, so without an explicit
+		# separator the close marker fuses onto the last rendered directive.
+		new=$(printf '%s%s\n%s\n%s\n' \
 			"${outer:+$outer
 }" \
 			"$MARK_OPEN" \
@@ -153,6 +179,7 @@ write_managed() {
 	mkdir -p "$(dirname "$file")"
 	local tmp
 	tmp=$(mktemp -p "$(dirname "$file")" .ub_uciext.XXXXXX)
+	: "${tmp:?mktemp returned empty path; refusing to write}"
 	printf '%s\n' "$new" > "$tmp"
 	chmod 0644 "$tmp"
 	mv "$tmp" "$file"
@@ -161,25 +188,20 @@ write_managed() {
 }
 
 restart_unbound() {
-	if [ -x /etc/init.d/unbound ]; then
-		/etc/init.d/unbound restart >/dev/null 2>&1 || \
-			log "warn: /etc/init.d/unbound restart returned non-zero"
-	else
+	if [ ! -x /etc/init.d/unbound ]; then
 		log "warn: /etc/init.d/unbound not found; skipping restart"
+		return 0
 	fi
+	local err
+	err=$(/etc/init.d/unbound restart 2>&1) || \
+		log "warn: /etc/init.d/unbound restart failed: $err"
 }
-
-# ---------------------------------------------------------------------------
-# Verbs
-# ---------------------------------------------------------------------------
 
 cmd_apply() {
 	load_srv
 	load_ext
 	local changed=0
-	# write_managed returns 0 on change; the `&&` short-circuit only flips
-	# changed to 1 when the write actually happened. unbound restart is
-	# expensive (drops cache); skip it when neither file moved.
+	# unbound restart drops the recursive cache; skip when neither file moved.
 	write_managed "$SRV_CONF" "$(render_srv_body)" && changed=1
 	write_managed "$EXT_CONF" "$(render_ext_body)" && changed=1
 	[ "$changed" = "1" ] && restart_unbound
@@ -194,8 +216,13 @@ cmd_clear() {
 	return 0
 }
 
-case "${1:-}" in
-	apply) cmd_apply ;;
-	clear) cmd_clear ;;
-	*)     echo "usage: $0 {apply|clear}" >&2; exit 2 ;;
-esac
+# Dispatch only when invoked with a verb. Sourcing without args (e.g. from
+# the unit-test harness) becomes a no-op so callers can exercise the
+# library functions directly.
+if [ "$#" -gt 0 ]; then
+	case "$1" in
+		apply) cmd_apply ;;
+		clear) cmd_clear ;;
+		*)     echo "usage: $0 {apply|clear}" >&2; exit 2 ;;
+	esac
+fi

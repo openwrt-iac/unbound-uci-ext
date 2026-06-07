@@ -1,7 +1,7 @@
 #!/bin/sh /etc/rc.common
 
-# procd oneshot wrapping the generator. Triggered on changes to
-# /etc/config/unbound_ext via procd_add_reload_trigger.
+# procd oneshot wrapping the generator. Triggered on changes to either
+# /etc/config/unbound_srv or /etc/config/unbound_ext via procd_add_reload_trigger.
 #
 # START=92 keeps us after unbound (which starts in the 60s) so the
 # generator runs against an unbound that's been able to lay down its

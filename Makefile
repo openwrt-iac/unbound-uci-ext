@@ -14,7 +14,7 @@ include $(INCLUDE_DIR)/package.mk
 define Package/unbound-uci-ext
   SECTION:=net
   CATEGORY:=Network
-  TITLE:=UCI extension for unbound `server:` directives
+  TITLE:=UCI extension for unbound extended-conf seam files
   URL:=https://github.com/openwrt-iac/unbound-uci-ext
   PKGARCH:=all
   DEPENDS:=+unbound-daemon
@@ -63,9 +63,9 @@ endef
 define Package/unbound-uci-ext/postinst
 #!/bin/sh
 [ -n "$${IPKG_INSTROOT}" ] && exit 0
-# Render the managed region once so it's in place from first boot, even if
-# the operator hasn't touched /etc/config/unbound_ext yet (the default
-# config has `enabled '0'` so this is a no-op until they opt in).
+# Render both managed regions once so they're in place from first boot,
+# even if the operator hasn't touched the UCI files yet (the default
+# configs ship with `enabled '0'`, so this is a no-op until they opt in).
 /etc/init.d/unbound-uci-ext enable >/dev/null 2>&1 || true
 /etc/init.d/unbound-uci-ext start >/dev/null 2>&1 || true
 exit 0
@@ -74,8 +74,8 @@ endef
 define Package/unbound-uci-ext/prerm
 #!/bin/sh
 [ -n "$${IPKG_INSTROOT}" ] && exit 0
-# Strip the managed region from /etc/unbound/unbound_srv.conf and restart
-# unbound, so removal leaves no stale lines behind.
+# Strip both managed regions (in unbound_srv.conf + unbound_ext.conf) and
+# restart unbound, so removal leaves no stale lines behind.
 /etc/init.d/unbound-uci-ext stop >/dev/null 2>&1 || true
 /etc/init.d/unbound-uci-ext disable >/dev/null 2>&1 || true
 exit 0
