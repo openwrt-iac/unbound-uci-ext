@@ -1,33 +1,27 @@
-# Extension UCI for unbound `server:` directives that the main unbound
-# package deliberately keeps out of UCI. Lines you set here are rendered
-# into a managed region of /etc/unbound/unbound_srv.conf and picked up by
-# unbound on the next restart.
+# Extension UCI for unbound clauses that live OUTSIDE the `server:`
+# clause (forward-zone, view, stub, remote-control). Lines you set here
+# are rendered into a managed region of /etc/unbound/unbound_ext.conf,
+# which unbound auto-includes at the end of unbound.conf (after the
+# server: clause has closed).
 #
-# Set enabled '1' once you've populated the options you want, then run:
-#   /etc/init.d/unbound-uci-ext reload
-# or just commit and the procd reload trigger fires automatically.
+# Each `list ext_line` entry is emitted verbatim. To configure a whole
+# clause (e.g. forward-zone:), supply one ext_line per line of the
+# clause, in order. The generator does no clause-aware validation; trust
+# unbound-checkconf to flag malformed output after the restart.
+#
+# For server-clause directives (interface:, outgoing-interface:,
+# ip-transparent:, etc.), use /etc/config/unbound_srv instead.
 
 config unbound_ext 'main'
 	option enabled '0'
 
-	# `interface:` - addresses unbound listens on. Format `addr` or
-	# `addr@port`. To run unbound as a loopback-only recursive backend
-	# behind dnsmasq, set this AND set the main unbound UCI's
-	# `interface_auto '0'` so the bind is exclusive.
-	#list interface_bind '127.0.0.1@5353'
-	#list interface_bind '::1@5353'
+	# Example: a forward-zone for example.org going to 1.1.1.1.
+	#list ext_line 'forward-zone:'
+	#list ext_line '  name: "example.org"'
+	#list ext_line '  forward-addr: 1.1.1.1'
+	#list ext_line '  forward-addr: 1.0.0.1'
 
-	# `outgoing-interface:` - source IP(s) unbound uses for upstream
-	# recursion. Useful for multi-WAN setups where you want recursion
-	# pinned to a specific egress.
-	#list interface_outgoing '192.0.2.1'
-
-	# `ip-transparent:` - bind to a not-yet-up / VIP / alias address.
-	# 1 = yes, 0 = no.
-	#option ip_transparent '0'
-
-	# Raw passthrough for any `server:` directive not surfaced above.
-	# Each line is emitted verbatim into the managed region. Use for
-	# advanced options the curated set doesn't cover.
-	#list srv_line 'harden-below-nxdomain: yes'
-	#list srv_line 'serve-expired: yes'
+	# Example: a view named "internal" with a local zone.
+	#list ext_line 'view:'
+	#list ext_line '  name: "internal"'
+	#list ext_line '  local-zone: "lan." static'

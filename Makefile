@@ -21,15 +21,24 @@ define Package/unbound-uci-ext
 endef
 
 define Package/unbound-uci-ext/description
-  Exposes unbound `server:` directives that OpenWrt's main unbound package
-  deliberately keeps out of UCI (`interface:`, `outgoing-interface:`,
-  `ip-transparent:`, plus a raw passthrough). Generates the directives
-  into a managed region of /etc/unbound/unbound_srv.conf - unbound's
-  documented extended-conf seam - and restarts unbound. UCI namespace
-  is /etc/config/unbound_ext.
+  Exposes unbound directives that OpenWrt's main unbound package
+  deliberately keeps out of UCI, via two UCI namespaces mapped 1:1 to
+  unbound's documented extended-conf seam files:
+
+    /etc/config/unbound_srv  ->  /etc/unbound/unbound_srv.conf
+        server: clause directives (interface, outgoing-interface,
+        ip-transparent, plus a raw `srv_line` passthrough).
+
+    /etc/config/unbound_ext  ->  /etc/unbound/unbound_ext.conf
+        whole clauses outside the server: clause (forward-zone, view,
+        stub, remote-control), expressed as a verbatim `ext_line` list.
+
+  The generator writes managed regions into both seam files and
+  restarts unbound if either changed.
 endef
 
 define Package/unbound-uci-ext/conffiles
+/etc/config/unbound_srv
 /etc/config/unbound_ext
 endef
 
@@ -45,6 +54,7 @@ define Package/unbound-uci-ext/install
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_DIR) $(1)/usr/lib/unbound-uci-ext
 
+	$(INSTALL_CONF) ./files/etc/config/unbound_srv $(1)/etc/config/unbound_srv
 	$(INSTALL_CONF) ./files/etc/config/unbound_ext $(1)/etc/config/unbound_ext
 	$(INSTALL_BIN)  ./files/etc/init.d/unbound-uci-ext $(1)/etc/init.d/unbound-uci-ext
 	$(INSTALL_BIN)  ./files/usr/lib/unbound-uci-ext/generator.sh $(1)/usr/lib/unbound-uci-ext/generator.sh

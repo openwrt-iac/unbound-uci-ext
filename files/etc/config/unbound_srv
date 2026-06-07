@@ -1,0 +1,36 @@
+# Extension UCI for unbound `server:` clause directives that the main
+# unbound package deliberately keeps out of UCI. Lines you set here are
+# rendered into a managed region of /etc/unbound/unbound_srv.conf, which
+# unbound auto-includes inside the `server:` clause on each restart.
+#
+# For directives that start a NEW clause (forward-zone, view, stub,
+# remote-control), use /etc/config/unbound_ext instead.
+#
+# Set enabled '1' once you've populated the options you want, then run:
+#   /etc/init.d/unbound-uci-ext reload
+# or just commit and the procd reload trigger fires automatically.
+
+config unbound_srv 'main'
+	option enabled '0'
+
+	# `interface:` - addresses unbound listens on. Format `addr` or
+	# `addr@port`. To run unbound as a loopback-only recursive backend
+	# behind dnsmasq, set this AND set the main unbound UCI's
+	# `interface_auto '0'` so the bind is exclusive.
+	#list interface_bind '127.0.0.1@5353'
+	#list interface_bind '::1@5353'
+
+	# `outgoing-interface:` - source IP(s) unbound uses for upstream
+	# recursion. Useful for multi-WAN setups where you want recursion
+	# pinned to a specific egress.
+	#list interface_outgoing '192.0.2.1'
+
+	# `ip-transparent:` - bind to a not-yet-up / VIP / alias address.
+	# 1 = yes, 0 = no.
+	#option ip_transparent '0'
+
+	# Raw passthrough for any `server:` directive not surfaced above.
+	# Each line is emitted verbatim into the managed region. Use for
+	# advanced options the curated set doesn't cover.
+	#list srv_line 'harden-below-nxdomain: yes'
+	#list srv_line 'serve-expired: yes'

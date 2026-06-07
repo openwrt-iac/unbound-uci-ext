@@ -1,20 +1,21 @@
 # unbound-uci-ext
 
-OpenWrt package: UCI extension exposing unbound `server:` directives that the main unbound package deliberately keeps out of its UCI surface.
+OpenWrt package: UCI surface for unbound directives that the main unbound package deliberately keeps out of UCI.
 
-Use cases:
-- Run unbound as a loopback-only recursive backend behind dnsmasq (`127.0.0.1@5353`).
-- Pin outgoing recursion to a specific WAN source IP (multi-WAN).
-- Bind unbound to addresses that aren't up at boot time (`ip-transparent`).
-- Drop verbatim `server:` lines for anything not curated.
+Two UCI namespaces map 1:1 to unbound's two documented extended-conf seam files:
+
+| UCI namespace | Target file | Position in unbound.conf |
+|---|---|---|
+| `/etc/config/unbound_srv` | `/etc/unbound/unbound_srv.conf` | inside the `server:` clause |
+| `/etc/config/unbound_ext` | `/etc/unbound/unbound_ext.conf` | at the end of `unbound.conf`, outside the server clause |
 
 ## Why a separate package
 
-OpenWrt's main unbound package authors leave advanced `server:` options out of UCI on purpose ([commit `658c27ea9`](https://github.com/openwrt/packages/commit/658c27ea9), closing [#13750](https://github.com/openwrt/packages/issues/13750)):
+OpenWrt's main unbound package leaves advanced directives out of UCI on purpose ([commit `658c27ea9`](https://github.com/openwrt/packages/commit/658c27ea9), closing [#13750](https://github.com/openwrt/packages/issues/13750)):
 
 > Interface wild cards are not explicitly set so that they can be customized in extended conf.
 
-`/etc/unbound/unbound_srv.conf` is the documented extension seam. unbound's init auto-includes it inside the `server:` clause on every restart. This package owns a managed region of that file and writes UCI-rendered directives into it.
+unbound's two seam files (`unbound_srv.conf` and `unbound_ext.conf`) are the documented extension points. This package owns a managed region of each, written from its own UCI surface.
 
 ## Install
 
@@ -26,28 +27,45 @@ apk add unbound-uci-ext
 
 `unbound-daemon` is pulled in as a dependency.
 
-## Configure
+## Configure: server-clause directives (`unbound_srv`)
+
+For directives that belong inside `server:` (interface binding, recursion source, harden flags, etc.). Example — loopback-only recursive resolver behind dnsmasq:
 
 ```sh
-uci set unbound_ext.main.enabled='1'
-uci add_list unbound_ext.main.interface_bind='127.0.0.1@5353'
+uci set unbound_srv.main.enabled='1'
+uci add_list unbound_srv.main.interface_bind='127.0.0.1@5353'
 uci set unbound.@unbound[0].interface_auto='0'   # pair: make the bind exclusive
 uci commit
 /etc/init.d/unbound-uci-ext reload
 ```
 
-After the reload, `/etc/unbound/unbound_srv.conf` contains a managed region between markers; check `/var/lib/unbound/unbound.conf` and run `unbound-checkconf` to confirm the directives landed.
-
-### UCI options
+### `unbound_srv` options
 
 | Option | unbound directive | Notes |
 |---|---|---|
 | `list interface_bind` | `interface:` | Addresses to listen on. `addr` or `addr@port`. Pair with `interface_auto '0'` in the main unbound UCI for exclusive binding. |
-| `list interface_outgoing` | `outgoing-interface:` | Source IP(s) for upstream recursion. |
+| `list interface_outgoing` | `outgoing-interface:` | Source IP(s) for upstream recursion (multi-WAN). |
 | `option ip_transparent` | `ip-transparent:` | Bind to not-yet-up / VIP / alias addresses. `1`/`0`. |
 | `list srv_line` | verbatim | Raw `server:`-clause passthrough for anything not curated above. |
 
-The escape hatch (`srv_line`) is intentional: any future curated option you'd want lives one verbatim line away. File an issue if you'd like an option promoted from `srv_line` to first-class.
+## Configure: outside-server clauses (`unbound_ext`)
+
+For directives that start NEW clauses (`forward-zone:`, `view:`, `stub:`, `remote-control:`). Example — a forward-zone for one domain:
+
+```sh
+uci set unbound_ext.main.enabled='1'
+uci add_list unbound_ext.main.ext_line='forward-zone:'
+uci add_list unbound_ext.main.ext_line='  name: "example.org"'
+uci add_list unbound_ext.main.ext_line='  forward-addr: 1.1.1.1'
+uci commit
+/etc/init.d/unbound-uci-ext reload
+```
+
+### `unbound_ext` options
+
+| Option | unbound | Notes |
+|---|---|---|
+| `list ext_line` | verbatim line | Each entry is one line of the final `unbound_ext.conf` managed region. Construct whole clauses by listing them in order. The generator does no clause-aware validation; `unbound-checkconf` flags malformed output after the restart. |
 
 ## Uninstall
 
@@ -55,16 +73,17 @@ The escape hatch (`srv_line`) is intentional: any future curated option you'd wa
 apk del unbound-uci-ext
 ```
 
-prerm strips the managed region from `/etc/unbound/unbound_srv.conf` and restarts unbound, so removal leaves no stale directives behind.
+prerm strips both managed regions and restarts unbound. The seam files themselves stay; only the marked regions go.
 
 ## How it works
 
 The generator at `/usr/lib/unbound-uci-ext/generator.sh`:
-1. Reads `/etc/config/unbound_ext`.
-2. Renders the directives into the managed region of `/etc/unbound/unbound_srv.conf` (between fixed marker comments). Content outside the markers is preserved verbatim.
-3. Diffs the result; if changed, `/etc/init.d/unbound restart`. Same input ⇒ no restart.
 
-The init script (`/etc/init.d/unbound-uci-ext`) is procd-oneshot; it registers a `procd_add_reload_trigger` on `unbound_ext` so `uci commit unbound_ext` re-runs the generator automatically.
+1. Reads `/etc/config/unbound_srv` and `/etc/config/unbound_ext`.
+2. Renders each into a managed region (between fixed marker comments) of its target file. Content outside the markers is preserved verbatim. Either UCI's section with `enabled '0'` or absent has its managed region emptied.
+3. Diffs each target against its pre-write content; if EITHER changed, `/etc/init.d/unbound restart`. Same input ⇒ no restart.
+
+The init script (`/etc/init.d/unbound-uci-ext`) is procd-oneshot; it registers `procd_add_reload_trigger` on both `unbound_srv` and `unbound_ext`, so `uci commit` on either namespace re-runs the generator automatically.
 
 ## License
 

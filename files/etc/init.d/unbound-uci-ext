@@ -25,5 +25,7 @@ reload_service() {
 }
 
 service_triggers() {
-	procd_add_reload_trigger "unbound_ext"
+	# Re-run on commits to either UCI namespace; the generator handles both
+	# files in one pass and skips the restart if neither changed.
+	procd_add_reload_trigger "unbound_srv" "unbound_ext"
 }
