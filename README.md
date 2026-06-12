@@ -2,6 +2,8 @@
 
 OpenWrt package: UCI surface for unbound directives that the main unbound package deliberately keeps out of UCI.
 
+> Not affiliated with the OpenWrt or unbound projects. This package started as the work of a single operator solving a specific problem on their own network, shared in the open in the hope it is useful to others with similar needs.
+
 Two UCI namespaces map 1:1 to unbound's two documented extended-conf seam files:
 
 | UCI namespace | Target file | Position in unbound.conf |
