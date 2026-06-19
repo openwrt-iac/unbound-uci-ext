@@ -101,6 +101,10 @@ uapi's curated `unbound/srv` + `unbound/ext` modules mirror exactly the same bou
 - **No `set -u`** in shell that sources `/lib/functions.sh`. The library is not `-u`-clean (it references `IPKG_INSTROOT`, `CONFIG_LIST_STATE`, and friends without defaulting them). `set -e` is sufficient.
 - **`/lib/functions.sh` is sourced inside `load_srv` / `load_ext`, not at top-level.** The cost is a single fs read on the second loader call (the source is idempotent); the benefit is the unit-test harness can source the generator on a plain Linux box without OpenWrt's lib being present.
 
+### Branch + PR workflow
+
+All code changes land via a PR, never via direct push to `main`. Cut a branch (`release/v<version>` for releases, `feat/<topic>` or `fix/<topic>` otherwise), push the branch, open the PR with `gh pr create --base main`, wait for CI to pass on the branch, then merge only when explicitly told. The PR is the reviewable diff; direct-pushing bypasses that gate even when CI passes locally. Force-with-lease is permitted on the branch, never on `main`. Tag-creation discipline is unchanged: signed annotated tag after merge, only when explicitly told to tag. Applies to every repo under the `openwrt-iac` org.
+
 ---
 
 ## Generator gotchas (load-bearing WHY)
