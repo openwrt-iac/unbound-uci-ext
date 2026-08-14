@@ -132,6 +132,10 @@ jobs:
             gh release create "$TAG" $PRE --title "$TAG" --generate-notes
           fi
           gh release upload "$TAG" "${{ steps.find_apk.outputs.apk }}" --clobber
+          # Deleting a tag in order to move it reverts its release to a draft, and
+          # `gh release view` succeeds on a draft, so the create branch above is skipped
+          # and the rebuilt apk lands in a release nobody can see or download.
+          gh release edit "$TAG" --draft=false
 
   # Multi-arch build verification. The package is PKGARCH:=all (pure shell +
   # UCI; no compiled code), so the build must succeed against every target
