@@ -11,7 +11,7 @@ This document captures the design contract. Changes here require the same scruti
 1. **Use the documented seam files; never patch unbound.** unbound ships `/etc/unbound/unbound_srv.conf` (auto-included inside the `server:` clause) and `/etc/unbound/unbound_ext.conf` (appended outside the server clause). These are the sanctioned extension points. We own a managed region of each. Anything outside the markers stays verbatim.
 2. **Single source of truth: UCI.** Operators (and uapi, and LuCI) edit `/etc/config/unbound_srv` and `/etc/config/unbound_ext`. The generator is a pure function from those two UCIs to the two seam files; it never writes anything else.
 3. **Restart unbound only when content changed.** unbound's restart drops the recursive cache, which is real user-visible cost. The generator diffs the rendered file against the existing content and skips the restart on a no-op rewrite.
-4. **No grammar validation in the generator.** Structural checks only (no embedded newline, max line length, non-empty). unbound's grammar is unbound's job; `unbound-checkconf` flags malformed output on the restart.
+4. **No grammar validation in the generator.** Structural checks only (no embedded newline, max line length, non-empty). unbound's grammar is unbound's job. Nothing runs `unbound-checkconf`: unbound stops on a line that it cannot parse, and its restart still exits 0.
 
 Before adopting new behavior, check it against these four. Prefer driving the underlying daemon's UCI surface if the option exists upstream; the bar for adding a new field here is "the main unbound package will not surface this and an operator-facing case demands it."
 
@@ -86,7 +86,7 @@ The generator rejects three things and emits a `logger` warning for each:
 - entry containing an embedded newline (would break out of the managed region)
 - entry longer than `MAX_LINE_LEN` (256) characters
 
-That is the complete validation surface. Everything else passes through to unbound, and `unbound-checkconf` is the source of truth for unbound's grammar after the restart.
+That is the complete validation surface. Everything else passes through to unbound. `unbound-checkconf` is the source of truth for unbound's grammar, but nothing runs it: an operator runs it by hand, and uapi watches unbound after a restart that it causes (openwrt-iac/uapi#259).
 
 uapi's curated `unbound/srv` + `unbound/ext` modules mirror exactly the same boundary at PATCH time, so clients get a 422 instead of a silently dropped line. If validation here changes, uapi's modules must change with it.
 

@@ -6,8 +6,10 @@
 #
 # Each `list ext_line` entry is emitted verbatim. To configure a whole
 # clause (e.g. forward-zone:), supply one ext_line per line of the
-# clause, in order. The generator does no clause-aware validation; trust
-# unbound-checkconf to flag malformed output after the restart.
+# clause, in order. The generator does no clause-aware validation, and
+# nothing else checks the lines. unbound stops on a line that it cannot
+# parse, and its restart still exits 0, so run unbound-checkconf by hand
+# after a change.
 #
 # For server-clause directives (interface:, outgoing-interface:,
 # ip-transparent:, etc.), use /etc/config/unbound_srv instead.
