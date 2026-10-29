@@ -67,7 +67,7 @@ uci commit
 
 | Option | unbound | Notes |
 |---|---|---|
-| `list ext_line` | verbatim line | Each entry is one line of the final `unbound_ext.conf` managed region. Construct whole clauses by listing them in order. The generator does no clause-aware validation; `unbound-checkconf` flags malformed output after the restart. |
+| `list ext_line` | verbatim line | Each entry is one line of the final `unbound_ext.conf` managed region. Construct whole clauses by listing them in order. The generator does no clause-aware validation, and nothing else checks the lines. unbound stops on a line that it cannot parse, and `/etc/init.d/unbound restart` still exits 0, so run `unbound-checkconf` by hand after a change. |
 
 ## Uninstall
 
